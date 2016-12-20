@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# check for parameter
+if [ -z "$1" ]
+then
+	echo "Usage: $(basename "$0") all|PATH"
+	exit 1
+fi
+
+# set temporary file for list
+LISTFILE="/dev/shm/iscsitarget-remove-volume.list.$$"
+
+# get a list of iscsi target volumes (tid lun path) to $LISTFILE
+if [ -e /proc/net/iet/volume ]
+then
+	unset TID LUN
+	# read each line of iscsi target volumes
+	while read -a WORD
+	do
+		if [ "${WORD[0]%:*}" = "tid" ]
+		then
+			# set tid
+			TID="${WORD[0]##*:}"
+		elif [ -n "$TID" ] && [ "${WORD[0]%:*}" = "lun" ]
+		then
+			# set lun
+			LUN="${WORD[0]##*:}"
+			# output list
+			echo "$TID $LUN ${WORD[6]#path:}"
+		fi
+	done < /proc/net/iet/volume
+fi > "$LISTFILE"
+
+if [ "$1" = "all" ]
+then
+	# remove all iscsi target volumes
+	cat "$LISTFILE" | while read -a V
+	do
+		ietadm --op delete --tid=${V[0]} --lun=${V[1]}
+	done
+else
+	# remove iscsi target volume with path $1
+	cat "$LISTFILE" | grep " $1$" | while read -a V
+	do
+		ietadm --op delete --tid=${V[0]} --lun=${V[1]}
+	done
+fi

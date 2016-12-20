@@ -1,0 +1,165 @@
+#!/bin/bash
+
+#
+# /etc/xbd/clients		all storage clients
+# /etc/xbd/$HOSTNAME.$VG.lun	lun to name mapping (e.g. LUN[X]="test1")
+#
+
+# source ssh-ControlMaster and ssh-Deadline function
+source /usr/local/lib/ssh
+
+# check for parameter device
+if [ -z "$1" ]
+then
+	echo "Usage: $(basename "$0") device"
+	exit 1
+fi
+
+# for using lio we mark this in /etc/xbd/xbd.conf
+if [ -f "/etc/xbd/xbd.conf" ]
+then
+        source /etc/xbd/xbd.conf
+fi
+
+# get device without all single quotation marks
+DEVICE="${1/\'/}"
+
+# check existence of device
+if [ ! -e "$DEVICE" ]
+then
+	echo "WARNING: Device '$DEVICE' does not exist"'!'
+fi
+
+# get name of device
+NAME="${DEVICE##*/}"
+# get volume group of device
+VG="${DEVICE%/$NAME}"
+VG="${VG##*/}"
+
+# set lun to name mapping file for this device
+FILE="/etc/xbd/$HOSTNAME.$VG.lun"
+
+# check if file exists
+if [ ! -f "$FILE" ]
+then
+	echo "ERROR: File '$FILE' not found"'!'
+	exit 1
+fi
+
+# function to check if name $NAME is used in the array LUN
+name_used() {
+	for i in ${!LUN[*]}
+	do
+		if [ "${LUN[$i]}" = "$NAME" ]
+		then
+			NUMBER="$i"
+			return 0
+		fi
+	done
+	return 1
+}
+
+#
+# create lock file
+#
+lockfile "$FILE.lock"
+
+# get all used luns
+unset LUN
+source "$FILE"
+
+if name_used
+then
+	# zero name of lun from map file
+	rpl --quiet "LUN[$NUMBER]='$NAME'" "LUN[$NUMBER]=''" "$FILE"
+else
+	echo "WARNING: Device '$DEVICE' is not exported"'!'
+fi
+
+#
+# remove lock file
+#
+rm -f "$FILE.lock"
+
+# distribute map file to all clients
+for SERVER in $(cat /etc/xbd/clients)
+do
+	ssh-ControlMaster "$SERVER"
+	# copy map file
+	scp -p -q $SSHOPTIONS "$FILE" "$SERVER:/etc/xbd/"
+done
+
+# regenerate ietd.conf
+CONFIG="/etc/ietd.conf"
+if [ ! -s "$CONFIG" ]
+then
+	CONFIG="/etc/iet/ietd.conf"
+fi
+if [ "${LIO}" != "1" ] ; 
+then
+(
+unset VG
+shopt -s nocasematch
+while IFS="\n" read LINE
+do
+	# if line contains no content
+	if [[ "$LINE" =~ ^[\ \t]*$ ]]
+	then
+		# print line unmodified
+		echo "$LINE"
+	else
+		# if line starts with Target
+		if [[ "$LINE" =~ ^Target\  ]]
+		then
+			# print line unmodified
+			echo "$LINE"
+			# get volume group out of target definition
+			VG=${LINE##*:}
+			# set lun to name mapping file
+			FILE="/etc/xbd/$HOSTNAME.$VG.lun"
+			# if map file exists
+			if [ -e "$FILE" ]
+			then
+				# get all used luns
+				unset LUN
+				source "$FILE"
+				# for all lun definitions
+				for i in ${!LUN[*]}
+				do
+					# only if a name is available
+					if [ -n "${LUN[$i]}" ]
+					then
+						echo -e "\tLun $i Path=/dev/$VG/${LUN[$i]},Type=blockio"
+					fi
+				done
+			else
+				# no map file found, no volume group
+				unset VG
+			fi
+		# if no volume group is set
+		elif [ -z "$VG" ]
+		then
+			# print line unmodified
+			echo "$LINE"
+		fi
+	fi
+done < $CONFIG > $CONFIG.$$
+mv $CONFIG.$$ $CONFIG
+)
+fi
+
+# restart iscsi server (iscsitarget)
+
+if [ "${LIO}" == "1" ]
+then
+targetcli /backstores/block delete ${VG}_${NAME}
+targetcli / saveconfig
+else
+        /etc/init.d/iscsitarget restart
+fi
+
+# rescan on all servers found in /etc/xbd/clients
+for SERVER in $(cat /etc/xbd/clients)
+do
+	ssh-Deadline $SSHOPTIONS "$SERVER" "/usr/bin/iscsiadm --mode node -R"
+done

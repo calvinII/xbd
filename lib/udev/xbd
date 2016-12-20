@@ -1,0 +1,29 @@
+#!/bin/bash -e
+
+# iscsi to xbd links
+if [ -n "$ID_PATH" ] && [ -z "${ID_PATH/ip-*-iscsi-iqn.*}" ]
+then
+	IQN="${ID_PATH#ip-*-iscsi-iqn.}"
+	SERVER="${IQN%%:*}"
+	SERVER="${SERVER##*.}"
+	DISK="${IQN##*:}"
+	VG="${DISK%%-*}"
+	NO="${DISK##*-}"
+	CONFIG="/etc/xbd/$SERVER.$VG.lun"
+	test -f "$CONFIG" && . "$CONFIG"
+	NAME="${LUN[$NO]:-$NO}"
+	VG="${VG/vg0}"
+	echo "$NAME.$VG${VG:+.}$SERVER"
+fi
+
+# lv to xbd links
+if [ -n "$DM_NAME" ]
+then
+	VG="${DM_NAME%%-*}"
+	VG="${VG/vg0}"
+	NAME="${DM_NAME#*-}"
+	NAME="${NAME//--/-}"
+	echo "$NAME.$VG${VG:+.}$HOSTNAME"
+fi
+
+exit 0

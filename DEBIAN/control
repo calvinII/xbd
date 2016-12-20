@@ -1,0 +1,8 @@
+Package: xbd
+Version: 0.9.14
+Maintainer: Markus Hochholdinger <Markus@Hochholdinger.net>
+Description: commands to (un)export logical volumes over iscsi
+Section: admin
+Priority: extra
+Architecture: all
+Depends: iscsitarget|targetcli|targetcli-fb, dmsetup, ssh|openssh-client, bash

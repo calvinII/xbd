@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# set directory for ssh pid files and ssh control sockets if not set
+SSHDIR="${SSHDIR:-/dev/shm/ssh}"
+# set common ssh options
+SSHOPTIONS="
+	-o StrictHostKeyChecking=no
+	-o ControlPath=$SSHDIR/%r@%h:%p
+	-o ConnectionAttempts=2
+	-o ConnectTimeout=15
+	-o ServerAliveInterval=15
+	-o ServerAliveCountMax=3
+	-o Compression=yes
+"
+# function to create a ssh control master connection to server $1
+ssh-ControlMaster() {
+	(
+	# sanity check
+	test -z "$1" && return
+	# set pid file
+	local PIDFILE="$SSHDIR/$1.pid"
+	# if ssh ist not running
+	if [ ! -s "$PIDFILE" ] || [ ! -d "/proc/$(cat "$PIDFILE")" ]
+	then
+		# make base directory if needed
+		mkdir -p "$SSHDIR"
+		# start ssh
+		ssh -o ControlMaster=yes $SSHOPTIONS -N $1 > /dev/null 2>&1 &
+		# save pid
+		echo -n "$!" > "$PIDFILE"
+	fi
+	) < /dev/null > /dev/null 2>&1
+}
+
+ssh-Deadline() {
+	# default deadline in seconds
+	SSHDEADLINE="${SSHDEADLINE:-30}"
+	# start ssh
+	ssh $SSHOPTIONS "$@" &
+	# remember pid
+	local PID="$!"
+	# loop till deadline is reached
+	for SSHCOUNTDOWN in $(seq 1 "$SSHDEADLINE")
+	do
+		# check if ssh is finished
+		if [ ! -d "/proc/$PID" ]
+		then
+			# get exit status from ssh
+			wait "$PID"
+			# return this function with exit status from ssh
+			return
+		fi
+		# wait one second
+		sleep 1
+	done
+	# if ssh is still running, try to kill it
+	test -d "/proc/$PID" && (kill "$PID"; sleep 1)
+	# if ssh is still running, try to kill -9 it
+	test -d "/proc/$PID" && (kill -9 "$PID")
+	# return this function with exit status from ssh
+	wait "$PID"
+}

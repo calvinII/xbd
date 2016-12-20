@@ -1,0 +1,30 @@
+# we are only interested in add and change actions for block devices
+SUBSYSTEM!="block",				GOTO="xbd_end"
+ACTION!="add|change",				GOTO="xbd_end"
+
+#
+# iscsi to xbd links
+#
+KERNEL!="sd*",					GOTO="xbd_sd_end"
+
+ add xbd symlink if it is a iSCSI-device
+ENV{DEVTYPE}=="disk", ENV{ID_PATH}=="ip-?*", \
+	PROGRAM="xbd", SYMLINK+="xbd/$result"
+LABEL="xbd_sd_end"
+
+#
+# lv to xbd links
+#
+KERNEL!="dm-*",					GOTO="xbd_dm_end"
+# Obtain device status
+IMPORT{program}="/sbin/dmsetup export -j $major -m $minor"
+ENV{DM_NAME}!="?*",				GOTO="xbd_dm_end"
+# these are temporary devices created by cryptsetup, we want to ignore them
+# and also hide them from HAL
+ENV{DM_NAME}=="temporary-cryptsetup-*",		OPTIONS="ignore_device"
+# add xbd symlink
+ENV{DM_NAME}=="?*", \
+	PROGRAM="xbd", SYMLINK+="xbd/$result"
+LABEL="xbd_dm_end"
+
+LABEL="xbd_end"
