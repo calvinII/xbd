@@ -26,4 +26,16 @@ then
 	echo "$NAME.$VG${VG:+.}$HOSTNAME"
 fi
 
+# zfs to xbd links
+if [ -z "${DEVNAME/#\/dev\/zd*/}"  ]
+then
+	for i in $(echo $DEVLINKS) ; do 
+            if [ -z "${i/#\/dev\/zvol*/}" ] ; then
+	        NAME=$(echo ${i##*/})
+                break
+            fi
+        done
+
+	echo "${NAME}.ZFS.${HOSTNAME}"
+fi
 exit 0
